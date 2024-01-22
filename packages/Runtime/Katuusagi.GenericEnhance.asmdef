@@ -1,0 +1,17 @@
+{
+    "name": "Katuusagi.GenericEnhance",
+    "rootNamespace": "Katuusagi.GenericEnhance",
+    "references": [
+        "GUID:a62e4aed4d1ea824188eb2f5322e1ab5",
+        "GUID:24beb62ab04e51240abd266bbebe6576"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

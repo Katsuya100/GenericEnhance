@@ -1,0 +1,24 @@
+{
+    "name": "com.katuusagi.genericenhance",
+    "displayName": "GenericEnhancce",
+    "description": "A library that enhances C#'s Generic features and helps implementation.",
+    "version": "1.0.0",
+    "unity": "2021.3",
+    "dependencies": {
+        "com.unity.test-framework": "1.1.31",
+        "com.unity.test-framework.performance": "3.0.2",
+        "com.katuusagi.ilpostprocessorcommon": "2.1.0",
+        "com.katuusagi.memoizationforunity": "1.4.0"
+    },
+    "keywords": [
+        "generic",
+        "optimize",
+        "metaprogramming"
+    ],
+    "author": {
+        "name": "Katuusagi a.k.a Katsuya100"
+    },
+    "documentationUrl": "https://github.com/Katsuya100/GenericEnhancce",
+    "changelogUrl": "https://github.com/Katsuya100/GenericEnhancce/releases",
+    "licensesUrl": "https://github.com/Katsuya100/GenericEnhancce/blob/v1.0.0/LICENSE"
+}
