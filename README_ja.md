@@ -18,6 +18,12 @@
 | .Net | 4.x, Standard 2.1 |
 
 ## インストール方法
+### 依存パッケージをインストール
+以下のパッケージをインストールする。  
+
+- [ILPostProcessorCommon v2.1.0](https://github.com/Katsuya100/ILPostProcessorCommon/tree/v1.1.0)
+- [MemoizationForUnity v1.4.0](https://github.com/Katsuya100/MemoizationForUnity/tree/v1.4.0)
+
 ### GenericEnhanceのインストール
 1. [Window > Package Manager]を開く。
 2. [+ > Add package from git url...]をクリックする。
