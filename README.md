@@ -20,6 +20,12 @@ These incorporate some of the features that were available in C++ templates for 
 | .Net | 4.x, Standard 2.1 |
 
 ## How to install
+### Install dependenies
+Install the following packages.  
+
+- [ILPostProcessorCommon v2.1.0](https://github.com/Katsuya100/ILPostProcessorCommon/tree/v1.1.0)
+- [MemoizationForUnity v1.4.0](https://github.com/Katsuya100/MemoizationForUnity/tree/v1.4.0)
+
 ### Installing GenericEnhance
 1. Open [Window > Package Manager].
 2. click [+ > Add package from git url...].
