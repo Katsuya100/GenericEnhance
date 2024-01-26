@@ -658,7 +658,7 @@ namespace Katuusagi.GenericEnhance.SourceGenerator
                     isExpand = false;
                 }
             }
-
+            else
             {
                 var identifiers = statement.DescendantNodes().OfType<IdentifierNameSyntax>().Where(v =>
                 {
