@@ -273,6 +273,36 @@ public struct Any<T>
 Debug.Log(typeof(Any<int>.Element)); // Int32
 ```
 
+### 型の再解釈
+`TypeDef`属性の付いている型はILレベルでリプレースされます。  
+しかし、C#側から見ると別の型として解釈されています。  
+C#から型を再解釈したい場合は`CastUtils.SafeAs`関数を用いましょう。
+```.cs
+[TypeDef(typeof(int))]
+public struct DefInt
+{
+}
+
+:
+
+int intValue = 100;
+DefInt defaultValue = default;
+ref DefInt defIntValue = ref CastUtils.SafeAs(ref intValue, ref defaultValue);
+
+Debug.Log(defIntValue); // 100
+```
+
+再解釈の失敗を検知する場合は`CastUtils.TryAs`関数を用いましょう。
+```.cs
+int intValue = 100;
+if (!CastUtils.TryAs(ref intValue, out DefInt defIntValue))
+{
+    // failed.
+}
+
+Debug.Log(defIntValue); // 100
+```
+
 ### 注意点
 値型は値型同士、参照型は参照型同士でしか`TypeDef`属性を指定できません。  
 ```.cs
@@ -290,7 +320,6 @@ public class DefInt
 {
 }
 ```
-
 
 ## Generic非型引数
 このライブラリの導入後、Generic引数として非型引数を与えられるようになります。  

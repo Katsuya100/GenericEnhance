@@ -272,6 +272,36 @@ public struct Any<T>
 Debug.Log(typeof(Any<int>.Element)); // Int32
 ```
 
+### Reinterpretation of type
+Types with the `TypeDef` attribute are replaced at the IL level.  
+However, from the C# side, they are interpreted as different types.  
+If you want to reinterpret the type from C#, use the `CastUtils.SafeAs` function.
+```.cs
+[TypeDef(typeof(int))]
+public struct DefInt
+{
+}
+
+:
+
+int intValue = 100;
+DefInt defaultValue = default;
+ref DefInt defIntValue = ref CastUtils.SafeAs(ref intValue, ref defaultValue);
+
+Debug.Log(defIntValue); // 100
+```
+
+Use the `CastUtils.TryAs` function to detect reinterpretation failures.
+```.cs
+int intValue = 100;
+if (!CastUtils.TryAs(ref intValue, out DefInt defIntValue))
+{
+    // failed.
+}
+
+Debug.Log(defIntValue); // 100
+```
+
 ### Note
 Value types may specify the `TypeDef` attribute only between value types, and reference types may specify it only between reference types.  
 ```.cs
