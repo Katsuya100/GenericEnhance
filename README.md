@@ -328,18 +328,18 @@ This allows non-type information to be passed from type arguments and guarantees
 When used in conjunction with Generic specialization, it is also possible to branch using type information.  
 
 ### How to Implementation
-非型パラメーターの記法は以下です。
+The notation for non-type parameters is as follows
 
-|  種類  |  例  |  記法例  |
+|  Type  |  Example  |  Notation  |
 | ---- | ---- | ---- |
-| 正の整数 | 100 | _100 |
-| 負の整数 | -100 | _n100 |
-| 正の少数 | 10.1 | _10_1 |
-| 負の少数 | -10.1 | _n10_1 |
-| 真 | true | _true |
-| 偽 | false | _false |
+| Positive Integer | 100 | _100 |
+| Negative Integer | -100 | _n100 |
+| Positive Decimal Fraction | 10.1 | _10_1 |
+| Negative Decimal Fraction | -10.1 | _n10_1 |
+| True | true | _true |
+| False | false | _false |
 
-実行時の値は`TypeFormula.GetValue`関数で取得します。
+The runtime value is obtained with the `TypeFormula.GetValue` method.
 
 ```.cs
 var value = TypeFormula.GetValue<_100, int>();
