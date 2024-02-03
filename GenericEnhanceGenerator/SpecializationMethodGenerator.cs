@@ -1,5 +1,4 @@
 ﻿using Katuusagi.CSharpScriptGenerator;
-using Katuusagi.GenericEnhance.SourceGenerator.Utils;
 using Katuusagi.SourceGeneratorCommon;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;

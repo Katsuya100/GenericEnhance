@@ -1,5 +1,4 @@
 ﻿using Katuusagi.CSharpScriptGenerator;
-using Katuusagi.GenericEnhance.SourceGenerator.Utils;
 using Katuusagi.SourceGeneratorCommon;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -9,7 +8,6 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
-using System.Text.RegularExpressions;
 
 namespace Katuusagi.GenericEnhance.SourceGenerator
 {
