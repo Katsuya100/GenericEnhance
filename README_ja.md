@@ -22,7 +22,7 @@
 以下のパッケージをインストールする。  
 
 - [ILPostProcessorCommon v2.1.0](https://github.com/Katsuya100/ILPostProcessorCommon/tree/v2.1.0)
-- [MemoizationForUnity v1.4.0](https://github.com/Katsuya100/MemoizationForUnity/tree/v1.4.0)
+- [MemoizationForUnity v1.4.1](https://github.com/Katsuya100/MemoizationForUnity/tree/v1.4.1)
 
 ### GenericEnhanceのインストール
 1. [Window > Package Manager]を開く。
