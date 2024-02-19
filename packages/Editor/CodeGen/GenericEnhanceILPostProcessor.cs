@@ -9,7 +9,6 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using Unity.CompilationPipeline.Common.ILPostProcessing;
-using static UnityEngine.Networking.UnityWebRequest;
 
 namespace Katuusagi.GenericEnhance.Editor
 {
@@ -142,12 +141,12 @@ namespace Katuusagi.GenericEnhance.Editor
                             {
                                 var instruction = instructions[i];
                                 int diff =0;
-                                TypeDefProcess(method, instruction);
-                                DefaultTypeProcess(method, instruction);
-                                TypeFormulaProcess(method, instruction);
-                                SpecializationProcess(instruction);
+                                isChanged = TypeDefProcess(method, instruction) || isChanged;
+                                isChanged = DefaultTypeProcess(method, instruction) || isChanged;
+                                isChanged = TypeFormulaProcess(method, instruction) || isChanged;
+                                isChanged = SpecializationProcess(instruction) || isChanged;
                                 isChanged = VariadicGenericProcess(body, instruction) || isChanged;
-                                NoneTypeProcess(method, instruction);
+                                isChanged = NoneTypeProcess(method, instruction) || isChanged;
                                 i += diff;
                             }
 
@@ -341,24 +340,25 @@ namespace Katuusagi.GenericEnhance.Editor
             }
         }
 
-        private void TypeDefProcess(MethodDefinition method, Instruction instruction)
+        private bool TypeDefProcess(MethodDefinition method, Instruction instruction)
         {
+            bool isChanged = false;
             if (instruction.Operand is TypeReference type)
             {
                 if (TryReplaceType(ref type, method, method, instruction))
                 {
+                    isChanged = true;
                     instruction.Operand = type;
                 }
             }
 
             if (instruction.Operand is MemberReference member)
             {
-                bool isReplaced = false;
                 {
                     var declaring = member.DeclaringType;
                     if (TryReplaceType(ref declaring, method, method, instruction))
                     {
-                        isReplaced = true;
+                        isChanged = true;
                         member.DeclaringType = declaring;
                     }
                 }
@@ -370,18 +370,20 @@ namespace Katuusagi.GenericEnhance.Editor
                         var genericArgument = genericInstanceMethod.GenericArguments[i];
                         if (TryReplaceType(ref genericArgument, method, method, instruction))
                         {
-                            isReplaced = true;
+                            isChanged = true;
                             genericInstanceMethod.GenericArguments[i] = genericArgument;
                         }
                     }
                 }
 
-                if (isReplaced &&
+                if (isChanged &&
                     member.Resolve() == null)
                 {
                     ILPPUtils.LogError("GENERICENHANCE2503", "GenericEnhance failed.", $"\"{member.DeclaringType}\" has not \"{member}\".", method, instruction);
                 }
             }
+
+            return isChanged;
         }
 
         private void TypeDefProcess(VariableDefinition variable, MethodDefinition def)
@@ -541,17 +543,17 @@ namespace Katuusagi.GenericEnhance.Editor
             return genericInstance.GenericArguments[value.i];
         }
 
-        private void DefaultTypeProcess(MethodDefinition method, Instruction instruction)
+        private bool DefaultTypeProcess(MethodDefinition method, Instruction instruction)
         {
             if (!(instruction.Operand is MethodReference calledMethod))
             {
-                return;
+                return false;
             }
 
             var calledMethodDef = calledMethod.Resolve();
             if (calledMethodDef == null)
             {
-                return;
+                return false;
             }
 
             var attrs =  calledMethodDef.CustomAttributes.ToArray();
@@ -559,7 +561,7 @@ namespace Katuusagi.GenericEnhance.Editor
                                                      .Select(v => v.ConstructorArguments[0].Value as TypeReference);
             if (!sourceDefaultTypeArguments.Any())
             {
-                return;
+                return false;
             }
 
             var parameterTypes = attrs.Where(v => v.AttributeType.FullName == "Katuusagi.GenericEnhance.SourceArgumentType")
@@ -597,7 +599,7 @@ namespace Katuusagi.GenericEnhance.Editor
                                                                                              v.Parameters.Select(v => v.ParameterType.FullName).SequenceEqual(parameterTypes));
             if (calledMethodDef == null)
             {
-                return;
+                return false;
             }
 
             var genericCalledMethod = new GenericInstanceMethod(calledMethodDef);
@@ -614,6 +616,7 @@ namespace Katuusagi.GenericEnhance.Editor
             }
 
             instruction.Operand = genericCalledMethod;
+            return true;
         }
 
         private void TypeFormulaProcess(TypeDefinition type)
@@ -722,13 +725,15 @@ namespace Katuusagi.GenericEnhance.Editor
             }
         }
 
-        private void TypeFormulaProcess(MethodDefinition method, Instruction instruction)
+        private bool TypeFormulaProcess(MethodDefinition method, Instruction instruction)
         {
+            bool isChanged = false;
             if (instruction.Operand is GenericInstanceType genericInstanceType)
             {
                 if (TryEmulateLiteralType(method, instruction, genericInstanceType, out var result) &&
                     !genericInstanceType.Is(result.TypeRef))
                 {
+                    isChanged = true;
                     instruction.Operand = result.TypeRef;
                 }
             }
@@ -739,6 +744,7 @@ namespace Katuusagi.GenericEnhance.Editor
                     if (TryEmulateLiteralType(method, instruction, member.DeclaringType, out var result) &&
                         !member.DeclaringType.Is(result.TypeRef))
                     {
+                        isChanged = true;
                         member.DeclaringType = result.TypeRef;
                     }
                 }
@@ -751,11 +757,14 @@ namespace Katuusagi.GenericEnhance.Editor
                         if (TryEmulateLiteralType(method, instruction, genericArgument, out var result) &&
                             !genericArgument.Is(result.TypeRef))
                         {
+                            isChanged = true;
                             genericInstanceMethod.GenericArguments[i] = result.TypeRef;
                         }
                     }
                 }
             }
+
+            return isChanged;
         }
 
         private void TypeFormulaProcess(VariableDefinition variable, MethodDefinition def)
@@ -997,17 +1006,17 @@ namespace Katuusagi.GenericEnhance.Editor
             literalType.Properties.Add(property);
         }
 
-        private void SpecializationProcess(Instruction instruction)
+        private bool SpecializationProcess(Instruction instruction)
         {
             if (!TryGetSpecialization(instruction, out var specializationMethodRef, out var methodInfo))
             {
-                return;
+                return false;
             }
 
             var arguments = specializationMethodRef.GenericArguments;
             if (arguments.Any(v => v.ContainsGenericParameter))
             {
-                return;
+                return false;
             }
 
             var methodDef = methodInfo.MethodDef;
@@ -1077,7 +1086,7 @@ namespace Katuusagi.GenericEnhance.Editor
             {
                 if (methodInfo.MethodDef.GenericParameters.Any(v => v.Constraints.Any(v => v.IsGenericInstance && v.Resolve().FullName == "Katuusagi.GenericEnhance.ITypeFormula`1")))
                 {
-                    return;
+                    return false;
                 }
 
                 var defaultMethodDef = methods.Where(v => v.Name == methodInfo.DefaultMethod).FirstOrDefault(cmp =>
@@ -1112,11 +1121,11 @@ namespace Katuusagi.GenericEnhance.Editor
 
             if (!methodReference.Resolve().IsPublic)
             {
-                return;
+                return false;
             }
 
             instruction.Operand = methodReference;
-            return;
+            return true;
         }
 
         private bool CompareGenericParameter(TypeReference x, TypeReference y)
@@ -1402,7 +1411,7 @@ namespace Katuusagi.GenericEnhance.Editor
             return false;
         }
 
-        private void NoneTypeProcess(MethodDefinition locationMethod, Instruction instruction)
+        private bool NoneTypeProcess(MethodDefinition locationMethod, Instruction instruction)
         {
             if ((instruction.Operand is FieldReference field && (field.FieldType.FullName == "Katuusagi.GenericEnhance.NoneType" || field.FieldType == _voidReference)) ||
                 (instruction.Operand is PropertyReference property &&  (property.PropertyType.FullName == "Katuusagi.GenericEnhance.NoneType" || property.PropertyType == _voidReference)) ||
@@ -1410,7 +1419,7 @@ namespace Katuusagi.GenericEnhance.Editor
             {
                 instruction.OpCode = OpCodes.Nop;
                 instruction.Operand = null;
-                return;
+                return true;
             }
 
             if (instruction.Operand is TypeReference type)
@@ -1418,8 +1427,9 @@ namespace Katuusagi.GenericEnhance.Editor
                 if (TryReplaceNoneType(type, out type, null, locationMethod, instruction))
                 {
                     instruction.Operand = type;
+                    return true;
                 }
-                return;
+                return false;
             }
 
             if (instruction.Operand is MethodReference method)
@@ -1427,9 +1437,12 @@ namespace Katuusagi.GenericEnhance.Editor
                 if (TryReplaceNoneType(method, out method, null, locationMethod, instruction))
                 {
                     instruction.Operand = method;
+                    return true;
                 }
-                return;
+                return false;
             }
+
+            return false;
         }
 
         private void NoneTypeProcess(VariableDefinition variable, MethodDefinition method)
