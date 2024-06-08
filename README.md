@@ -16,7 +16,7 @@ These incorporate some of the features that were available in C++ templates for 
 ## System Requirements
 |  Environment  |  Version  |
 | ---- | ---- |
-| Unity | 2021.3.15f1, 2022.3.2f1 |
+| Unity | 2021.3.38f1, 2022.3.20f1 |
 | .Net | 4.x, Standard 2.1 |
 
 ## How to install
