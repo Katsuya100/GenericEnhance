@@ -14,15 +14,15 @@
 ## 動作確認環境
 |  環境  |  バージョン  |
 | ---- | ---- |
-| Unity | 2021.3.15f1, 2022.3.2f1 |
+| Unity | 2021.3.38f1, 2022.3.20f1 |
 | .Net | 4.x, Standard 2.1 |
 
 ## インストール方法
 ### 依存パッケージをインストール
 以下のパッケージをインストールする。  
 
-- [ILPostProcessorCommon v2.2.0](https://github.com/Katsuya100/ILPostProcessorCommon/tree/v2.2.0)
-- [MemoizationForUnity v1.4.2](https://github.com/Katsuya100/MemoizationForUnity/tree/v1.4.2)
+- [ILPostProcessorCommon v2.3.0](https://github.com/Katsuya100/ILPostProcessorCommon/tree/v2.3.0)
+- [MemoizationForUnity v1.5.0](https://github.com/Katsuya100/MemoizationForUnity/tree/v1.5.0)
 
 ### GenericEnhanceのインストール
 1. [Window > Package Manager]を開く。
