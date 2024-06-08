@@ -4,7 +4,6 @@ using Mono.Cecil;
 using Mono.Cecil.Cil;
 using Mono.Cecil.Rocks;
 using System;
-using System.Buffers;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -14,6 +13,20 @@ namespace Katuusagi.GenericEnhance.Editor
 {
     internal class GenericEnhanceILPostProcessor : ILPostProcessor
     {
+        public class TypeReferenceHashSetPool : ThreadStaticCollectionPool<HashSet<TypeReference>, TypeReference, TypeReferenceHashSetPool>
+        {
+            static TypeReferenceHashSetPool()
+            {
+                _createInstance = () => new HashSet<TypeReference>(TypeReferenceComparer.Default);
+            }
+
+            public static Handle Get(out HashSet<TypeReference> result, IEnumerable<TypeReference> init)
+            {
+                var ret = Get(out result);
+                result.UnionWith(init);
+                return ret;
+            }
+        }
 
         private struct SpecializeMethodInfo
         {
@@ -26,26 +39,13 @@ namespace Katuusagi.GenericEnhance.Editor
         private struct SpecializeInfo
         {
             public string SpecialMethod;
-            public Dictionary<string, TypeReference> BindTypes;
+            public (string name, TypeReference type)[] BindTypes;
         }
 
         private Dictionary<MethodReference, SpecializeMethodInfo> _specializationResult = new Dictionary<MethodReference, SpecializeMethodInfo>(MethodReferenceComparer.Default);
         private ModuleDefinition _module;
 
         private TypeReference _voidReference;
-        private TypeReference _valueType;
-        private TypeReference _itypeFormulaTrue;
-        private TypeReference _itypeFormulaFalse;
-        private GenericInstanceType _itypeFormulaInt8Type;
-        private GenericInstanceType _itypeFormulaUInt8Type;
-        private GenericInstanceType _itypeFormulaInt16Type;
-        private GenericInstanceType _itypeFormulaUInt16Type;
-        private GenericInstanceType _itypeFormulaInt32Type;
-        private GenericInstanceType _itypeFormulaUInt32Type;
-        private GenericInstanceType _itypeFormulaInt64Type;
-        private GenericInstanceType _itypeFormulaUInt64Type;
-        private GenericInstanceType _itypeFormulaSingleType;
-        private GenericInstanceType _itypeFormulaDoubleType;
 
         public override ILPostProcessor GetInstance() => this;
         public override bool WillProcess(ICompiledAssembly compiledAssembly)
@@ -68,108 +68,89 @@ namespace Katuusagi.GenericEnhance.Editor
                     _module = assembly.MainModule;
 
                     _voidReference = _module.TypeSystem.Void;
-                    _valueType = _module.ImportReference(typeof(ValueType));
-                    var usingTypeFormula = _module.Types.SelectMany(v => v.Interfaces)
-                                                    .Select(v => v.InterfaceType)
-                                                    .FirstOrDefault(v => v.FullName.StartsWith("Katuusagi.GenericEnhance.ITypeFormula`1"));
-                    if (usingTypeFormula != null)
+                    TypeFormulaUtils.Init(_module);
+
+                    using (ThreadStaticArrayPool.Get(out var types, assembly.Modules.SelectMany(v => v.Types).GetAllTypes()))
                     {
-                        var itypeFormula = usingTypeFormula.GetElementType();
-                        _itypeFormulaTrue = new TypeReference(string.Empty, "_true", usingTypeFormula.Module, usingTypeFormula.Scope, true);
-                        _itypeFormulaFalse = new TypeReference(string.Empty, "_false", usingTypeFormula.Module, usingTypeFormula.Scope, true);
-
-                        _itypeFormulaInt8Type = new GenericInstanceType(itypeFormula);
-                        _itypeFormulaUInt8Type = new GenericInstanceType(itypeFormula);
-                        _itypeFormulaInt16Type = new GenericInstanceType(itypeFormula);
-                        _itypeFormulaUInt16Type = new GenericInstanceType(itypeFormula);
-                        _itypeFormulaInt32Type = new GenericInstanceType(itypeFormula);
-                        _itypeFormulaUInt32Type = new GenericInstanceType(itypeFormula);
-                        _itypeFormulaInt64Type = new GenericInstanceType(itypeFormula);
-                        _itypeFormulaUInt64Type = new GenericInstanceType(itypeFormula);
-                        _itypeFormulaSingleType = new GenericInstanceType(itypeFormula);
-                        _itypeFormulaDoubleType = new GenericInstanceType(itypeFormula);
-
-                        _itypeFormulaInt8Type.GenericArguments.Add(_module.TypeSystem.SByte);
-                        _itypeFormulaUInt8Type.GenericArguments.Add(_module.TypeSystem.Byte);
-                        _itypeFormulaInt16Type.GenericArguments.Add(_module.TypeSystem.Int16);
-                        _itypeFormulaUInt16Type.GenericArguments.Add(_module.TypeSystem.UInt16);
-                        _itypeFormulaInt32Type.GenericArguments.Add(_module.TypeSystem.Int32);
-                        _itypeFormulaUInt32Type.GenericArguments.Add(_module.TypeSystem.UInt32);
-                        _itypeFormulaInt64Type.GenericArguments.Add(_module.TypeSystem.Int64);
-                        _itypeFormulaUInt64Type.GenericArguments.Add(_module.TypeSystem.UInt64);
-                        _itypeFormulaSingleType.GenericArguments.Add(_module.TypeSystem.Single);
-                        _itypeFormulaDoubleType.GenericArguments.Add(_module.TypeSystem.Double);
-                    }
-
-                    foreach (var type in assembly.Modules.SelectMany(v => v.Types).GetAllTypes().ToArray())
-                    {
-                        TypeDefProcess(type);
-                        TypeFormulaProcess(type);
-
-                        foreach (var field in type.Fields.ToArray())
+                        foreach (var type in types)
                         {
-                            TypeDefProcess(field);
-                            TypeFormulaProcess(field);
-                            NoneTypeProcess(field);
-                        }
+                            TypeDefProcess(type);
+                            TypeFormulaProcess(type);
 
-                        foreach (var property in type.Properties.ToArray())
-                        {
-                            TypeDefProcess(property);
-                            TypeFormulaProcess(property);
-                            NoneTypeProcess(property);
-                        }
-
-                        foreach (var method in type.Methods.ToArray())
-                        {
-                            TypeDefProcess(method);
-                            TypeFormulaProcess(method);
-                            if (NoneTypeProcess(type, method))
+                            using (ThreadStaticArrayPool.Get(out var fields, type.Fields))
                             {
-                                continue;
+                                foreach (var field in fields)
+                                {
+                                    TypeDefProcess(field);
+                                    TypeFormulaProcess(field);
+                                    NoneTypeProcess(field);
+                                }
                             }
 
-                            var body = method.Body;
-                            if (body == null)
+                            using (ThreadStaticArrayPool.Get(out var properties, type.Properties))
                             {
-                                continue;
+                                foreach (var property in properties)
+                                {
+                                    TypeDefProcess(property);
+                                    TypeFormulaProcess(property);
+                                    NoneTypeProcess(property);
+                                }
                             }
 
-                            bool isChanged = false;
-                            var instructions = body.Instructions;
-                            for (var i = 0; i < instructions.Count; ++i)
+                            using (ThreadStaticArrayPool.Get(out var methods, type.Methods))
                             {
-                                var instruction = instructions[i];
-                                int diff =0;
-                                isChanged = TypeDefProcess(method, instruction) || isChanged;
-                                isChanged = DefaultTypeProcess(method, instruction) || isChanged;
-                                isChanged = TypeFormulaProcess(method, instruction) || isChanged;
-                                isChanged = SpecializationProcess(instruction) || isChanged;
-                                isChanged = VariadicGenericProcess(body, instruction) || isChanged;
-                                isChanged = NoneTypeProcess(method, instruction) || isChanged;
-                                i += diff;
-                            }
+                                foreach (var method in methods)
+                                {
+                                    TypeDefProcess(method);
+                                    TypeFormulaProcess(method);
+                                    if (NoneTypeProcess(type, method))
+                                    {
+                                        continue;
+                                    }
 
-                            if (isChanged)
-                            {
-                                ILPPUtils.ResolveInstructionOpCode(instructions);
-                            }
+                                    var body = method.Body;
+                                    if (body == null)
+                                    {
+                                        continue;
+                                    }
 
-                            var variables = body.Variables;
-                            for (var i = 0; i < variables.Count; ++i)
-                            {
-                                var variable = variables[i];
-                                TypeDefProcess(variable, method);
-                                TypeFormulaProcess(variable, method);
-                                NoneTypeProcess(variable, method);
-                            }
-                        }
+                                    bool isChanged = false;
+                                    var instructions = body.Instructions;
+                                    for (var i = 0; i < instructions.Count; ++i)
+                                    {
+                                        var instruction = instructions[i];
+                                        int diff =0;
+                                        isChanged = TypeDefProcess(method, instruction) || isChanged;
+                                        isChanged = DefaultTypeProcess(method, instruction) || isChanged;
+                                        isChanged = TypeFormulaProcess(method, instruction) || isChanged;
+                                        isChanged = SpecializationProcess(instruction) || isChanged;
+                                        isChanged = VariadicGenericProcess(body, instruction) || isChanged;
+                                        isChanged = NoneTypeProcess(method, instruction) || isChanged;
+                                        i += diff;
+                                    }
 
-                        foreach (var @event in type.Events)
-                        {
-                            TypeDefProcess(@event);
-                            TypeFormulaProcess(@event);
-                            NoneTypeProcess(@event);
+                                    if (isChanged)
+                                    {
+                                        ILPPUtils.ResolveInstructionOpCode(instructions);
+                                    }
+
+                                    var variables = body.Variables;
+                                    for (var i = 0; i < variables.Count; ++i)
+                                    {
+                                        var variable = variables[i];
+                                        TypeDefProcess(variable, method);
+                                        TypeFormulaProcess(variable, method);
+                                        NoneTypeProcess(variable, method);
+                                    }
+                                }
+
+                                foreach (var @event in type.Events)
+                                {
+                                    TypeDefProcess(@event);
+                                    TypeFormulaProcess(@event);
+                                    NoneTypeProcess(@event);
+                                }
+                            }
                         }
                     }
 
@@ -224,7 +205,11 @@ namespace Katuusagi.GenericEnhance.Editor
                     }
                     else
                     {
+#if UNITY_2022_1_OR_NEWER
+                        isValueType = genericParameter.Constraints.Any(v => v.ConstraintType.FullName == "System.ValueType");
+#else
                         isValueType = genericParameter.Constraints.Any(v => v.FullName == "System.ValueType");
+#endif
                         if (!isValueType && (genericParameter.Attributes & GenericParameterAttributes.ReferenceTypeConstraint) == 0)
                         {
                             // ã≠êßìIÇ…é∏îsÇ≥ÇπÇÈ
@@ -263,8 +248,18 @@ namespace Katuusagi.GenericEnhance.Editor
                 for (int j = 0; j < genericParameter.Constraints.Count; ++j)
                 {
                     var constraint = genericParameter.Constraints[j];
+#if UNITY_2022_1_OR_NEWER
+                    var constraintType = constraint.ConstraintType;
+                    if (TryReplaceType(ref constraintType, type, null, null))
+#else
                     if (TryReplaceType(ref constraint, type, null, null))
+#endif
                     {
+#if UNITY_2022_1_OR_NEWER
+                        var constraintTmp = new GenericParameterConstraint(constraintType);
+                        constraintTmp.MetadataToken = constraint.MetadataToken;
+                        constraint = constraintTmp;
+#endif
                         genericParameter.Constraints[j] = constraint;
                     }
                 }
@@ -332,8 +327,18 @@ namespace Katuusagi.GenericEnhance.Editor
                 for (int j = 0; j < genericParameter.Constraints.Count; ++j)
                 {
                     var constraint = genericParameter.Constraints[j];
+#if UNITY_2022_1_OR_NEWER
+                    var constraintType = constraint.ConstraintType;
+                    if (TryReplaceType(ref constraintType, method, def, instruction))
+#else
                     if (TryReplaceType(ref constraint, method, def, instruction))
+#endif
                     {
+#if UNITY_2022_1_OR_NEWER
+                        var constraintTmp = new GenericParameterConstraint(constraintType);
+                        constraintTmp.MetadataToken = constraint.MetadataToken;
+                        constraint = constraintTmp;
+#endif
                         genericParameter.Constraints[j] = constraint;
                     }
                 }
@@ -406,7 +411,10 @@ namespace Katuusagi.GenericEnhance.Editor
 
         private bool TryReplaceType(ref TypeReference srcType, MemberReference member, MethodDefinition method, Instruction instruction)
         {
-            return TryReplaceTypeInternal(ref srcType, member, method, instruction, new HashSet<TypeReference>(TypeReferenceComparer.Default));
+            using (TypeReferenceHashSetPool.Get(out var expandedTypes))
+            {
+                return TryReplaceTypeInternal(ref srcType, member, method, instruction, expandedTypes);
+            }
         }
 
         private bool TryReplaceTypeInternal(ref TypeReference srcType, MemberReference member, MethodDefinition method, Instruction instruction, HashSet<TypeReference> expandedTypes)
@@ -438,38 +446,50 @@ namespace Katuusagi.GenericEnhance.Editor
                 for (int i = 0; i < genericInstanceType.GenericArguments.Count; ++i)
                 {
                     var element = genericInstanceType.GenericArguments[i];
-                    if (TryReplaceTypeInternal(ref element, member, method, instruction, new HashSet<TypeReference>(expandedTypes, TypeReferenceComparer.Default)))
+                    using (TypeReferenceHashSetPool.Get(out var subExpandedTypes, expandedTypes))
                     {
-                        genericInstanceType.GenericArguments[i] = element;
-                        result = true;
+                        if (TryReplaceTypeInternal(ref element, member, method, instruction, subExpandedTypes))
+                        {
+                            genericInstanceType.GenericArguments[i] = element;
+                            result = true;
+                        }
                     }
                 }
             }
             else if (srcType is ArrayType arrayType)
             {
                 var element = arrayType.ElementType;
-                if (TryReplaceTypeInternal(ref element, member, method, instruction, new HashSet<TypeReference>(expandedTypes, TypeReferenceComparer.Default)))
+                using (TypeReferenceHashSetPool.Get(out var subExpandedTypes, expandedTypes))
                 {
-                    srcType = new ArrayType(element);
-                    result = true;
+                    if (TryReplaceTypeInternal(ref element, member, method, instruction, subExpandedTypes))
+                    {
+                        srcType = new ArrayType(element);
+                        result = true;
+                    }
                 }
             }
             else if (srcType is PointerType pointerType)
             {
                 var element = pointerType.ElementType;
-                if (TryReplaceTypeInternal(ref element, member, method, instruction, new HashSet<TypeReference>(expandedTypes, TypeReferenceComparer.Default)))
+                using (TypeReferenceHashSetPool.Get(out var subExpandedTypes, expandedTypes))
                 {
-                    srcType = new PointerType(element);
-                    result = true;
+                    if (TryReplaceTypeInternal(ref element, member, method, instruction, subExpandedTypes))
+                    {
+                        srcType = new PointerType(element);
+                        result = true;
+                    }
                 }
             }
             else if (srcType is ByReferenceType byRefType)
             {
                 var element = byRefType.ElementType;
-                if (TryReplaceTypeInternal(ref element, member, method, instruction, new HashSet<TypeReference>(expandedTypes, TypeReferenceComparer.Default)))
+                using (TypeReferenceHashSetPool.Get(out var subExpandedTypes, expandedTypes))
                 {
-                    srcType = new ByReferenceType(element);
-                    result = true;
+                    if (TryReplaceTypeInternal(ref element, member, method, instruction, subExpandedTypes))
+                    {
+                        srcType = new ByReferenceType(element);
+                        result = true;
+                    }
                 }
             }
 
@@ -556,15 +576,16 @@ namespace Katuusagi.GenericEnhance.Editor
                 return false;
             }
 
-            var attrs =  calledMethodDef.CustomAttributes.ToArray();
-            var sourceDefaultTypeArguments = attrs.Where(v => v.AttributeType.FullName == "Katuusagi.GenericEnhance.SourceDefaultType")
-                                                     .Select(v => v.ConstructorArguments[0].Value as TypeReference);
-            if (!sourceDefaultTypeArguments.Any())
+            using (ThreadStaticArrayPool.Get(out var attrs, calledMethodDef.CustomAttributes))
             {
-                return false;
-            }
+                var sourceDefaultTypeArguments = attrs.Where(v => v.AttributeType.FullName == "Katuusagi.GenericEnhance.SourceDefaultType")
+                                                     .Select(v => v.ConstructorArguments[0].Value as TypeReference);
+                if (!sourceDefaultTypeArguments.Any())
+                {
+                    return false;
+                }
 
-            var parameterTypes = attrs.Where(v => v.AttributeType.FullName == "Katuusagi.GenericEnhance.SourceArgumentType")
+                var parameterTypesQuery = attrs.Where(v => v.AttributeType.FullName == "Katuusagi.GenericEnhance.SourceArgumentType")
                                       .Select(v =>
                                       {
                                           var a = v.ConstructorArguments[0].Value;
@@ -572,57 +593,60 @@ namespace Katuusagi.GenericEnhance.Editor
                                           {
                                               return t.FullName;
                                           }
-                                          
+
                                           if (a is string s)
                                           {
                                               return s;
                                           }
 
                                           return string.Empty;
-                                      }).ToArray();
-
-            IEnumerable<TypeReference> genericArguments = Array.Empty<TypeReference>();
-            if (calledMethod is GenericInstanceMethod genericInstance)
-            {
-                genericArguments = genericInstance.GenericArguments;
-            }
-
-            if (sourceDefaultTypeArguments.Any())
-            {
-                genericArguments = genericArguments.Concat(sourceDefaultTypeArguments).ToArray();
-            }
-
-            var calledMethodName = calledMethodDef.Name;
-            var calledGenericCount = genericArguments.Count();
-            calledMethodDef = calledMethodDef.DeclaringType.GetMethods().FirstOrDefault(v => v.Name == calledMethodName &&
-                                                                                             v.GenericParameters.Count == calledGenericCount &&
-                                                                                             v.Parameters.Select(v => v.ParameterType.FullName).SequenceEqual(parameterTypes));
-            if (calledMethodDef == null)
-            {
-                return false;
-            }
-
-            var genericCalledMethod = new GenericInstanceMethod(calledMethodDef);
-            foreach (var genericArgument in genericArguments)
-            {
-                TypeReference t = genericArgument;
-                if (genericArgument.GetType() == typeof(TypeReference))
+                                      });
+                using (ThreadStaticArrayPool.Get(out var parameterTypes, parameterTypesQuery))
+                using (ThreadStaticListPool.Get<TypeReference>(out var genericArguments))
                 {
-                    var def = genericArgument.Resolve();
-                    t = method.Module.ImportReference(def);
+                    if (calledMethod is GenericInstanceMethod genericInstance)
+                    {
+                        genericArguments.AddRange(genericInstance.GenericArguments);
+                    }
+
+                    if (sourceDefaultTypeArguments.Any())
+                    {
+                        genericArguments.AddRange(sourceDefaultTypeArguments);
+                    }
+
+                    var calledMethodName = calledMethodDef.Name;
+                    var calledGenericCount = genericArguments.Count();
+                    calledMethodDef = calledMethodDef.DeclaringType.GetMethods().FirstOrDefault(v => v.Name == calledMethodName &&
+                                                                                                     v.GenericParameters.Count == calledGenericCount &&
+                                                                                                     v.Parameters.Select(v => v.ParameterType.FullName).SequenceEqual(parameterTypes));
+                    if (calledMethodDef == null)
+                    {
+                        return false;
+                    }
+
+                    var genericCalledMethod = new GenericInstanceMethod(calledMethodDef);
+                    foreach (var genericArgument in genericArguments)
+                    {
+                        TypeReference t = genericArgument;
+                        if (genericArgument.GetType() == typeof(TypeReference))
+                        {
+                            var def = genericArgument.Resolve();
+                            t = method.Module.ImportReference(def);
+                        }
+
+                        genericCalledMethod.GenericArguments.Add(t);
+                    }
+
+                    instruction.Operand = genericCalledMethod;
+                    return true;
                 }
-
-                genericCalledMethod.GenericArguments.Add(t);
             }
-
-            instruction.Operand = genericCalledMethod;
-            return true;
         }
 
         private void TypeFormulaProcess(TypeDefinition type)
         {
             {
-                if (TryEmulateLiteralType(null, null, type.BaseType, out var result) &&
+                if (TypeFormulaUtils.TryEmulateLiteralType(null, null, type.BaseType, out var result) &&
                     !type.BaseType.Is(result.TypeRef))
                 {
                     type.BaseType = result.TypeRef;
@@ -632,7 +656,7 @@ namespace Katuusagi.GenericEnhance.Editor
             for (int i = 0; i < type.Interfaces.Count; ++i)
             {
                 var @interface = type.Interfaces[i];
-                if (TryEmulateLiteralType(null, null, @interface.InterfaceType, out var result) &&
+                if (TypeFormulaUtils.TryEmulateLiteralType(null, null, @interface.InterfaceType, out var result) &&
                     !@interface.InterfaceType.Is(result.TypeRef))
                 {
                     @interface.InterfaceType = result.TypeRef;
@@ -644,11 +668,22 @@ namespace Katuusagi.GenericEnhance.Editor
                 var genericParameter = type.GenericParameters[i];
                 for (int j = 0; j < genericParameter.Constraints.Count; ++j)
                 {
+#if UNITY_2022_1_OR_NEWER
                     var constraint = genericParameter.Constraints[j];
-                    if (TryEmulateLiteralType(null, null, constraint, out var result) &&
-                        !constraint.Is(result.TypeRef))
+                    var constraintType = constraint.ConstraintType;
+#else
+                    var constraintType = genericParameter.Constraints[j];
+#endif
+                    if (TypeFormulaUtils.TryEmulateLiteralType(null, null, constraintType, out var result) &&
+                        !constraintType.Is(result.TypeRef))
                     {
+#if UNITY_2022_1_OR_NEWER
+                        var constraintTmp = new GenericParameterConstraint(result.TypeRef);
+                        constraintTmp.MetadataToken = constraint.MetadataToken;
+                        genericParameter.Constraints[j] = constraintTmp;
+#else
                         genericParameter.Constraints[j] = result.TypeRef;
+#endif
                     }
                 }
             }
@@ -656,7 +691,7 @@ namespace Katuusagi.GenericEnhance.Editor
 
         private void TypeFormulaProcess(FieldDefinition field)
         {
-            if (TryEmulateLiteralType(null, null, field.FieldType, out var result) &&
+            if (TypeFormulaUtils.TryEmulateLiteralType(null, null, field.FieldType, out var result) &&
                 !field.FieldType.Is(result.TypeRef))
             {
                 field.FieldType = result.TypeRef;
@@ -666,7 +701,7 @@ namespace Katuusagi.GenericEnhance.Editor
         private void TypeFormulaProcess(PropertyDefinition property)
         {
             var method = property.GetMethod ?? property.SetMethod;
-            if (TryEmulateLiteralType(method, null, property.PropertyType, out var result) &&
+            if (TypeFormulaUtils.TryEmulateLiteralType(method, null, property.PropertyType, out var result) &&
                 !property.PropertyType.Is(result.TypeRef))
             {
                 property.PropertyType = result.TypeRef;
@@ -680,7 +715,7 @@ namespace Katuusagi.GenericEnhance.Editor
             for (int i = 0; i < method.Overrides.Count; ++i)
             {
                 var @override = method.Overrides[i];
-                if (TryEmulateLiteralType(method, null, @override.DeclaringType, out var result) &&
+                if (TypeFormulaUtils.TryEmulateLiteralType(method, null, @override.DeclaringType, out var result) &&
                     !@override.DeclaringType.Is(result.TypeRef))
                 {
                     @override.DeclaringType = result.TypeRef;
@@ -693,7 +728,7 @@ namespace Katuusagi.GenericEnhance.Editor
         private void TypeFormulaProcess(MethodReference method, MethodDefinition def, Instruction instruction)
         {
             {
-                if (TryEmulateLiteralType(def, instruction, method.ReturnType, out var result) &&
+                if (TypeFormulaUtils.TryEmulateLiteralType(def, instruction, method.ReturnType, out var result) &&
                     !method.ReturnType.Is(result.TypeRef))
                 {
                     method.ReturnType = result.TypeRef;
@@ -703,7 +738,7 @@ namespace Katuusagi.GenericEnhance.Editor
             for (int i = 0; i < method.Parameters.Count; ++i)
             {
                 var parameter = method.Parameters[i];
-                if (TryEmulateLiteralType(def, instruction, parameter.ParameterType, out var result) &&
+                if (TypeFormulaUtils.TryEmulateLiteralType(def, instruction, parameter.ParameterType, out var result) &&
                     !parameter.ParameterType.Is(result.TypeRef))
                 {
                     parameter.ParameterType = result.TypeRef;
@@ -715,11 +750,22 @@ namespace Katuusagi.GenericEnhance.Editor
                 var genericParameter = method.GenericParameters[i];
                 for (int j = 0; j < genericParameter.Constraints.Count; ++j)
                 {
+#if UNITY_2022_1_OR_NEWER
                     var constraint = genericParameter.Constraints[j];
-                    if (TryEmulateLiteralType(def, instruction, constraint, out var result) &&
-                        !constraint.Is(result.TypeRef))
+                    var constraintType = constraint.ConstraintType;
+#else
+                    var constraintType = genericParameter.Constraints[j];
+#endif
+                    if (TypeFormulaUtils.TryEmulateLiteralType(def, instruction, constraintType, out var result) &&
+                        !constraintType.Is(result.TypeRef))
                     {
+#if UNITY_2022_1_OR_NEWER
+                        var constraintTmp = new GenericParameterConstraint(result.TypeRef);
+                        constraintTmp.MetadataToken = constraint.MetadataToken;
+                        genericParameter.Constraints[j] = constraintTmp;
+#else
                         genericParameter.Constraints[j] = result.TypeRef;
+#endif
                     }
                 }
             }
@@ -730,7 +776,7 @@ namespace Katuusagi.GenericEnhance.Editor
             bool isChanged = false;
             if (instruction.Operand is GenericInstanceType genericInstanceType)
             {
-                if (TryEmulateLiteralType(method, instruction, genericInstanceType, out var result) &&
+                if (TypeFormulaUtils.TryEmulateLiteralType(method, instruction, genericInstanceType, out var result) &&
                     !genericInstanceType.Is(result.TypeRef))
                 {
                     isChanged = true;
@@ -741,7 +787,7 @@ namespace Katuusagi.GenericEnhance.Editor
             if (instruction.Operand is MemberReference member)
             {
                 {
-                    if (TryEmulateLiteralType(method, instruction, member.DeclaringType, out var result) &&
+                    if (TypeFormulaUtils.TryEmulateLiteralType(method, instruction, member.DeclaringType, out var result) &&
                         !member.DeclaringType.Is(result.TypeRef))
                     {
                         isChanged = true;
@@ -754,7 +800,7 @@ namespace Katuusagi.GenericEnhance.Editor
                     for (int i = 0; i < genericInstanceMethod.GenericArguments.Count; ++i)
                     {
                         var genericArgument = genericInstanceMethod.GenericArguments[i];
-                        if (TryEmulateLiteralType(method, instruction, genericArgument, out var result) &&
+                        if (TypeFormulaUtils.TryEmulateLiteralType(method, instruction, genericArgument, out var result) &&
                             !genericArgument.Is(result.TypeRef))
                         {
                             isChanged = true;
@@ -769,7 +815,7 @@ namespace Katuusagi.GenericEnhance.Editor
 
         private void TypeFormulaProcess(VariableDefinition variable, MethodDefinition def)
         {
-            if (TryEmulateLiteralType(def, null, variable.VariableType, out var result) &&
+            if (TypeFormulaUtils.TryEmulateLiteralType(def, null, variable.VariableType, out var result) &&
                 !variable.VariableType.Is(result.TypeRef))
             {
                 variable.VariableType = result.TypeRef;
@@ -778,232 +824,11 @@ namespace Katuusagi.GenericEnhance.Editor
 
         private void TypeFormulaProcess(EventDefinition @event)
         {
-            if (TryEmulateLiteralType(null, null, @event.EventType, out var result) &&
+            if (TypeFormulaUtils.TryEmulateLiteralType(null, null, @event.EventType, out var result) &&
                 !@event.EventType.Is(result.TypeRef))
             {
                 @event.EventType = result.TypeRef;
             }
-        }
-
-        private bool TryEmulateLiteralType(MethodDefinition method, Instruction instruction, TypeReference typeRef, out TypeReferenceInfo result)
-        {
-            if (typeRef == null)
-            {
-                result = default;
-                return false;
-            }
-
-            result = new TypeReferenceInfo(typeRef);
-            switch (result.Style)
-            {
-                case TypeStyle.BooleanLiteral:
-                case TypeStyle.IntegerLiteral:
-                case TypeStyle.FloatLiteral:
-                case TypeStyle.Boolean:
-                case TypeStyle.Int8:
-                case TypeStyle.UInt8:
-                case TypeStyle.Int16:
-                case TypeStyle.UInt16:
-                case TypeStyle.Int32:
-                case TypeStyle.UInt32:
-                case TypeStyle.Int64:
-                case TypeStyle.UInt64:
-                case TypeStyle.Single:
-                case TypeStyle.Double:
-                    return true;
-            }
-
-            if (!(typeRef is GenericInstanceType genType))
-            {
-                return true;
-            }
-
-            var argumentInfos = new TypeReferenceInfo[genType.GenericArguments.Count];
-            for (int i = 0; i < argumentInfos.Length; ++i)
-            {
-                var argument = genType.GenericArguments[i];
-                if (!TryEmulateLiteralType(method, instruction, argument, out var argumentInfo))
-                {
-                    return false;
-                }
-
-                argumentInfos[i] = argumentInfo;
-            }
-
-            object value = null;
-            try
-            {
-                switch (result.Style)
-                {
-                    case TypeStyle.Add:
-                        value = ArithmeticUtils.Add(argumentInfos[0].Type, argumentInfos[1].Value, argumentInfos[2].Value);
-                        break;
-                    case TypeStyle.Sub:
-                        value = ArithmeticUtils.Sub(argumentInfos[0].Type, argumentInfos[1].Value, argumentInfos[2].Value);
-                        break;
-                    case TypeStyle.Mul:
-                        value = ArithmeticUtils.Mul(argumentInfos[0].Type, argumentInfos[1].Value, argumentInfos[2].Value);
-                        break;
-                    case TypeStyle.Div:
-                        value = ArithmeticUtils.Div(argumentInfos[0].Type, argumentInfos[1].Value, argumentInfos[2].Value);
-                        break;
-                    case TypeStyle.Mod:
-                        value = ArithmeticUtils.Mod(argumentInfos[0].Type, argumentInfos[1].Value, argumentInfos[2].Value);
-                        break;
-                    case TypeStyle.Minus:
-                        value = ArithmeticUtils.Minus(argumentInfos[0].Type, argumentInfos[1].Value);
-                        break;
-                    case TypeStyle.BitNot:
-                        value = BitLogicalUtils.Not(argumentInfos[0].Type, argumentInfos[1].Value);
-                        break;
-                    case TypeStyle.BitAnd:
-                        value = BitLogicalUtils.And(argumentInfos[0].Type, argumentInfos[1].Value, argumentInfos[2].Value);
-                        break;
-                    case TypeStyle.BitOr:
-                        value = BitLogicalUtils.Or(argumentInfos[0].Type, argumentInfos[1].Value, argumentInfos[2].Value);
-                        break;
-                    case TypeStyle.BitXor:
-                        value = BitLogicalUtils.Xor(argumentInfos[0].Type, argumentInfos[1].Value, argumentInfos[2].Value);
-                        break;
-                    case TypeStyle.LShift:
-                        if (argumentInfos[2].Value == null)
-                        {
-                            value = null;
-                            break;
-                        }
-                        value = BitLogicalUtils.LShift(argumentInfos[0].Type, argumentInfos[1].Value, CastUtils.CastNumeric<int>(argumentInfos[2].Value));
-                        break;
-                    case TypeStyle.RShift:
-                        if (argumentInfos[2].Value == null)
-                        {
-                            value = null;
-                            break;
-                        }
-                        value = BitLogicalUtils.RShift(argumentInfos[0].Type, argumentInfos[1].Value, CastUtils.CastNumeric<int>(argumentInfos[2].Value));
-                        break;
-                    case TypeStyle.CastNumeric:
-                        value = CastUtils.CastNumeric(argumentInfos[0].Type, argumentInfos[1].Value);
-                        break;
-                    case TypeStyle.Not:
-                        value = ConditionalLogicalUtils.Not((bool)argumentInfos[0].Value);
-                        break;
-                    case TypeStyle.And:
-                        value = ConditionalLogicalUtils.And((bool)argumentInfos[0].Value, (bool)argumentInfos[1].Value);
-                        break;
-                    case TypeStyle.Or:
-                        value = ConditionalLogicalUtils.Or((bool)argumentInfos[0].Value, (bool)argumentInfos[1].Value);
-                        break;
-                    case TypeStyle.Equal:
-                        value = ConditionalLogicalUtils.Equal(argumentInfos[0].Type, argumentInfos[1].Value, argumentInfos[2].Value);
-                        break;
-                    case TypeStyle.NotEqual:
-                        value = ConditionalLogicalUtils.NotEqual(argumentInfos[0].Type, argumentInfos[1].Value, argumentInfos[2].Value);
-                        break;
-                    case TypeStyle.Greater:
-                        value = ConditionalLogicalUtils.Greater(argumentInfos[0].Type, argumentInfos[1].Value, argumentInfos[2].Value);
-                        break;
-                    case TypeStyle.GreaterOrEqual:
-                        value = ConditionalLogicalUtils.GreaterOrEqual(argumentInfos[0].Type, argumentInfos[1].Value, argumentInfos[2].Value);
-                        break;
-                    case TypeStyle.Less:
-                        value = ConditionalLogicalUtils.Less(argumentInfos[0].Type, argumentInfos[1].Value, argumentInfos[2].Value);
-                        break;
-                    case TypeStyle.LessOrEqual:
-                        value = ConditionalLogicalUtils.LessOrEqual(argumentInfos[0].Type, argumentInfos[1].Value, argumentInfos[2].Value);
-                        break;
-                }
-            }
-            catch
-            {
-                ILPPUtils.LogError("GENERICENHANCE1501", "GenericEnhance failed.", $"TypeFormula precalculate failed.", method, instruction);
-                throw;
-            }
-
-            if (value == null)
-            {
-                result.TypeRef = result.TypeRef.GetElementType().MakeGenericInstanceType(argumentInfos.Select(v => v.TypeRef).ToArray());
-                return true;
-            }
-
-            typeRef = CreateLiteralType(value);
-            result = new TypeReferenceInfo(typeRef);
-            return true;
-        }
-
-        private TypeReference CreateLiteralType(object value)
-        {
-            if (value is bool boolValue)
-            {
-                return boolValue ? _itypeFormulaTrue : _itypeFormulaFalse;
-            }
-
-            var name = value.ToString();
-            if (value is float || value is double)
-            {
-                name = name.Replace(".", "_");
-            }
-
-            name = $"_{name.Replace("-", "n")}";
-
-            var literalType = _module.Types.FirstOrDefault(v => v.FullName == name);
-            if (literalType != null)
-            {
-                return literalType;
-            }
-
-            var typeAttr = TypeAttributes.NotPublic | TypeAttributes.SequentialLayout | TypeAttributes.AnsiClass | TypeAttributes.Sealed | TypeAttributes.BeforeFieldInit;
-            literalType = new TypeDefinition(string.Empty, name, typeAttr, _valueType);
-            literalType.PackingSize = 0;
-            literalType.ClassSize = 1;
-            
-            literalType.Interfaces.Add(new InterfaceImplementation(_itypeFormulaInt8Type));
-            literalType.Interfaces.Add(new InterfaceImplementation(_itypeFormulaUInt8Type));
-            literalType.Interfaces.Add(new InterfaceImplementation(_itypeFormulaInt16Type));
-            literalType.Interfaces.Add(new InterfaceImplementation(_itypeFormulaUInt16Type));
-            literalType.Interfaces.Add(new InterfaceImplementation(_itypeFormulaInt32Type));
-            literalType.Interfaces.Add(new InterfaceImplementation(_itypeFormulaUInt32Type));
-            literalType.Interfaces.Add(new InterfaceImplementation(_itypeFormulaInt64Type));
-            literalType.Interfaces.Add(new InterfaceImplementation(_itypeFormulaUInt64Type));
-            literalType.Interfaces.Add(new InterfaceImplementation(_itypeFormulaSingleType));
-            literalType.Interfaces.Add(new InterfaceImplementation(_itypeFormulaDoubleType));
-
-            CreateMember(literalType, _itypeFormulaInt8Type, _module.TypeSystem.SByte, typeof(sbyte), "Int8", value);
-            CreateMember(literalType, _itypeFormulaUInt8Type, _module.TypeSystem.Byte, typeof(byte), "UInt8", value);
-            CreateMember(literalType, _itypeFormulaInt16Type, _module.TypeSystem.Int16, typeof(short), "In16", value);
-            CreateMember(literalType, _itypeFormulaUInt16Type, _module.TypeSystem.UInt16, typeof(ushort), "UInt16", value);
-            CreateMember(literalType, _itypeFormulaInt32Type, _module.TypeSystem.Int32, typeof(int), "Int32", value);
-            CreateMember(literalType, _itypeFormulaUInt32Type, _module.TypeSystem.UInt32, typeof(uint), "UInt32", value);
-            CreateMember(literalType, _itypeFormulaInt64Type, _module.TypeSystem.Int64, typeof(long), "Int64", value);
-            CreateMember(literalType, _itypeFormulaUInt64Type, _module.TypeSystem.UInt64, typeof(ulong), "UInt64", value);
-            CreateMember(literalType, _itypeFormulaSingleType, _module.TypeSystem.Single, typeof(float), "Single", value);
-            CreateMember(literalType, _itypeFormulaDoubleType, _module.TypeSystem.Double, typeof(double), "Double", value);
-
-            _module.Types.Add(literalType);
-
-            return literalType;
-        }
-
-        private void CreateMember(TypeDefinition literalType, TypeReference baseTypeRef, TypeReference propertyTypeRef, Type propertyType, string propertyName, object value)
-        {
-            var methodAttr = MethodAttributes.Private | MethodAttributes.Final | MethodAttributes.HideBySig | MethodAttributes.SpecialName | MethodAttributes.NewSlot | MethodAttributes.Virtual;
-            value = CastUtils.CastNumeric(propertyType, value);
-
-            var field = new FieldDefinition($"{propertyName}ResultValue", FieldAttributes.Public | FieldAttributes.Static | FieldAttributes.Literal, propertyTypeRef);
-            field.Constant = value;
-            literalType.Fields.Add(field);
-
-            var getMethod = new MethodDefinition($"Katuusagi.GenericEnhance.ITypeFormula<{propertyTypeRef.FullName}>.get_Result", methodAttr, propertyTypeRef);
-            MethodReference baseMethod = baseTypeRef.Resolve().Methods.FirstOrDefault(v => v.Name == "get_Result");
-            baseMethod = _module.ImportReference(baseMethod);
-            baseMethod.DeclaringType = baseTypeRef;
-            getMethod.Overrides.Add(baseMethod);
-            getMethod.Body.Instructions.Add(ILPPUtils.LoadLiteral(value));
-            getMethod.Body.Instructions.Add(Instruction.Create(OpCodes.Ret));
-            literalType.Methods.Add(getMethod);
-
-            var property = new PropertyDefinition($"Katuusagi.GenericEnhance.ITypeFormula<{propertyTypeRef.FullName}>.Result", PropertyAttributes.None, propertyTypeRef);
-            property.GetMethod = getMethod;
-            literalType.Properties.Add(property);
         }
 
         private bool SpecializationProcess(Instruction instruction)
@@ -1021,111 +846,124 @@ namespace Katuusagi.GenericEnhance.Editor
 
             var methodDef = methodInfo.MethodDef;
             var parameters = methodDef.GenericParameters;
-            var argInfos = parameters
+
+            using (ThreadStaticDictionaryPool.Get<string, TypeReference>(out var argInfos))
+            {
+                var argInfoPairs = parameters
                                 .Select((v, i) => (v, i))
-                                .Join(arguments.Select((v, i) => (v, i)), v => v.i, v => v.i, (v1, v2) => (v1.v, v2.v))
-                                .ToDictionary(v => v.Item1.Name, v => v.Item2);
-
-            var returnType = methodDef.ReturnType;
-            if (argInfos.TryGetValue(returnType.Name, out var returnTmp))
-            {
-                returnType = returnTmp;
-            }
-
-            var parameterTypes = methodDef.Parameters.Select(v =>
-            {
-                var parameterType = v.ParameterType;
-                if (argInfos.TryGetValue(parameterType.Name, out var parameterTmp))
+                                .Join(arguments.Select((v, i) => (v, i)), v => v.i, v => v.i, (v1, v2) => (v1.v, v2.v));
+                foreach (var pair in argInfoPairs)
                 {
-                    parameterType = parameterTmp;
+                    argInfos.Add(pair.Item1.Name, pair.Item2);
                 }
 
-                return parameterType;
-            }).ToArray();
-
-            var methods = methodDef.DeclaringType.Methods;
-            MethodReference methodReference = null;
-            foreach (var specializeInfo in methodInfo.SpecializeInfos)
-            {
-                if (!specializeInfo.BindTypes.All(v => argInfos[v.Key].Is(v.Value)))
+                var returnType = methodDef.ReturnType;
+                if (argInfos.TryGetValue(returnType.Name, out var returnTmp))
                 {
-                    continue;
+                    returnType = returnTmp;
                 }
 
-                methodReference = methods.Where(v => v.Name == specializeInfo.SpecialMethod).FirstOrDefault(cmp =>
+                var parameterTypesQuery = methodDef.Parameters.Select(v =>
                 {
-                    if (cmp.GenericParameters.Count != 0 ||
-                       !cmp.ReturnType.Is(returnType))
+                    var parameterType = v.ParameterType;
+                    if (argInfos.TryGetValue(parameterType.Name, out var parameterTmp))
                     {
-                        return false;
+                        parameterType = parameterTmp;
                     }
 
-                    var index = 0;
-                    for (int i = 0; i < parameterTypes.Length; ++i)
-                    {
-                        var cmpParameter = cmp.Parameters[index];
-                        var parameterType = parameterTypes[index];
-                        if (!cmpParameter.ParameterType.Is(parameterType))
-                        {
-                            ++index;
-                            return false;
-                        }
-                        ++index;
-                    }
-
-                    return true;
+                    return parameterType;
                 });
 
-                if (methodReference != null)
+                using (ThreadStaticArrayPool.Get(out var parameterTypes, parameterTypesQuery))
                 {
-                    break;
-                }
-            }
-
-            if (methodReference == null)
-            {
-                if (methodInfo.MethodDef.GenericParameters.Any(v => v.Constraints.Any(v => v.IsGenericInstance && v.Resolve().FullName == "Katuusagi.GenericEnhance.ITypeFormula`1")))
-                {
-                    return false;
-                }
-
-                var defaultMethodDef = methods.Where(v => v.Name == methodInfo.DefaultMethod).FirstOrDefault(cmp =>
-                {
-                    if (cmp.GenericParameters.Count != methodDef.GenericParameters.Count)
+                    var methods = methodDef.DeclaringType.Methods;
+                    MethodReference methodReference = null;
+                    foreach (var specializeInfo in methodInfo.SpecializeInfos)
                     {
-                        return false;
+                        if (!specializeInfo.BindTypes.All(v => argInfos[v.name].Is(v.type)))
+                        {
+                            continue;
+                        }
+
+                        methodReference = methods.Where(v => v.Name == specializeInfo.SpecialMethod).FirstOrDefault(cmp =>
+                        {
+                            if (cmp.GenericParameters.Count != 0 ||
+                               !cmp.ReturnType.Is(returnType))
+                            {
+                                return false;
+                            }
+
+                            var index = 0;
+                            for (int i = 0; i < parameterTypes.Length; ++i)
+                            {
+                                var cmpParameter = cmp.Parameters[index];
+                                var parameterType = parameterTypes[index];
+                                if (!cmpParameter.ParameterType.Is(parameterType))
+                                {
+                                    ++index;
+                                    return false;
+                                }
+                                ++index;
+                            }
+
+                            return true;
+                        });
+
+                        if (methodReference != null)
+                        {
+                            break;
+                        }
                     }
-
-                    if (!cmp.ReturnType.Is(methodDef.ReturnType) &&
-                        !CompareGenericParameter(cmp.ReturnType, methodDef.ReturnType))
+                    if (methodReference == null)
                     {
-                        return false;
-                    }
-
-                    for (int i = 0; i < cmp.Parameters.Count; ++i)
-                    {
-                        var cmpParameter = cmp.Parameters[i];
-                        var defParameter = methodDef.Parameters[i];
-                        if (!cmpParameter.ParameterType.Is(defParameter.ParameterType) &&
-                            !CompareGenericParameter(cmpParameter.ParameterType, defParameter.ParameterType))
+#if UNITY_2022_1_OR_NEWER
+                        if (methodInfo.MethodDef.GenericParameters.Any(v => v.Constraints.Any(v => v.ConstraintType.IsGenericInstance && v.ConstraintType.Resolve().FullName == "Katuusagi.GenericEnhance.ITypeFormula`1")))
+#else
+                        if (methodInfo.MethodDef.GenericParameters.Any(v => v.Constraints.Any(v => v.IsGenericInstance && v.Resolve().FullName == "Katuusagi.GenericEnhance.ITypeFormula`1")))
+#endif
                         {
                             return false;
                         }
+
+                        var defaultMethodDef = methods.Where(v => v.Name == methodInfo.DefaultMethod).FirstOrDefault(cmp =>
+                        {
+                            if (cmp.GenericParameters.Count != methodDef.GenericParameters.Count)
+                            {
+                                return false;
+                            }
+
+                            if (!cmp.ReturnType.Is(methodDef.ReturnType) &&
+                                !CompareGenericParameter(cmp.ReturnType, methodDef.ReturnType))
+                            {
+                                return false;
+                            }
+
+                            for (int i = 0; i < cmp.Parameters.Count; ++i)
+                            {
+                                var cmpParameter = cmp.Parameters[i];
+                                var defParameter = methodDef.Parameters[i];
+                                if (!cmpParameter.ParameterType.Is(defParameter.ParameterType) &&
+                                    !CompareGenericParameter(cmpParameter.ParameterType, defParameter.ParameterType))
+                                {
+                                    return false;
+                                }
+                            }
+
+                            return true;
+                        });
+
+                        methodReference = defaultMethodDef.MakeGenericInstanceMethod(specializationMethodRef.GenericArguments);
                     }
 
+                    if (!methodReference.Resolve().IsPublic)
+                    {
+                        return false;
+                    }
+
+                    instruction.Operand = methodReference;
                     return true;
-                });
-
-                methodReference = defaultMethodDef.MakeGenericInstanceMethod(specializationMethodRef.GenericArguments);
+                }
             }
-
-            if (!methodReference.Resolve().IsPublic)
-            {
-                return false;
-            }
-
-            instruction.Operand = methodReference;
-            return true;
         }
 
         private bool CompareGenericParameter(TypeReference x, TypeReference y)
@@ -1173,36 +1011,38 @@ namespace Katuusagi.GenericEnhance.Editor
 
             var defaultMethodName = specializationMethodAttr.ConstructorArguments.FirstOrDefault();
 
-            var specializedMethods =  method.CustomAttributes.Where(v => v.AttributeType.FullName == "Katuusagi.GenericEnhance.SpecializedMethod").ToArray();
-            var specializeInfos = new List<SpecializeInfo>();
-            foreach (var specializedMethod in specializedMethods)
+            using (ThreadStaticArrayPool.Get(out var specializedMethods, method.CustomAttributes.Where(v => v.AttributeType.FullName == "Katuusagi.GenericEnhance.SpecializedMethod")))
+            using (ThreadStaticListPool.Get<SpecializeInfo>(out var specializeInfos))
             {
-                var specialMethod = specializedMethod.ConstructorArguments[0].Value as string;
-                var vaargs = specializedMethod.ConstructorArguments[1].Value as CustomAttributeArgument[];
-
-                var bindTypes = new Dictionary<string, TypeReference>();
-                for (int i = 0; i < method.GenericParameters.Count; ++i)
+                foreach (var specializedMethod in specializedMethods)
                 {
-                    var genericParameterName = method.GenericParameters[i].Name;
-                    var bindType = vaargs[i].Value as TypeReference;
-                    bindTypes.Add(genericParameterName, bindType);
+                    var specialMethod = specializedMethod.ConstructorArguments[0].Value as string;
+                    var vaargs = specializedMethod.ConstructorArguments[1].Value as CustomAttributeArgument[];
+
+                    var bindTypes = new (string name, TypeReference type)[method.GenericParameters.Count];
+                    for (int i = 0; i < method.GenericParameters.Count; ++i)
+                    {
+                        var genericParameterName = method.GenericParameters[i].Name;
+                        var bindType = vaargs[i].Value as TypeReference;
+                        bindTypes[i] = (genericParameterName, bindType);
+                    }
+
+                    var specializeInfo = new SpecializeInfo();
+                    specializeInfo.SpecialMethod = specialMethod;
+                    specializeInfo.BindTypes = bindTypes;
+                    specializeInfos.Add(specializeInfo);
                 }
 
-                var specializeInfo = new SpecializeInfo();
-                specializeInfo.SpecialMethod = specialMethod;
-                specializeInfo.BindTypes = bindTypes;
-                specializeInfos.Add(specializeInfo);
+                result = methodRef;
+                methodInfo = new SpecializeMethodInfo()
+                {
+                    Result = true,
+                    MethodDef = method,
+                    DefaultMethod = defaultMethodName.Value as string,
+                    SpecializeInfos = specializeInfos.ToArray()
+                };
+                _specializationResult.Add(method, methodInfo);
             }
-
-            result = methodRef;
-            methodInfo = new SpecializeMethodInfo()
-            {
-                Result = true,
-                MethodDef = method,
-                DefaultMethod = defaultMethodName.Value as string,
-                SpecializeInfos = specializeInfos.ToArray()
-            };
-            _specializationResult.Add(method, methodInfo);
             return true;
         }
 
@@ -1508,131 +1348,131 @@ namespace Katuusagi.GenericEnhance.Editor
                 }
             }
 
-            List<TypeReference> genArguments = null;
+            var genArgCount = 0;
             var declaringType = method.DeclaringType;
             var returnType = methodDef.ReturnType;
-            var parameters = methodDef.Parameters.ToList();
-            var genParameters = methodDef.GenericParameters.ToList();
-
             bool isChanged = false;
-            if (declaringType is GenericInstanceType genInstanceType)
+            using (ThreadStaticListPool.Get(out var parameters, methodDef.Parameters))
+            using (ThreadStaticListPool.Get(out var genParameters, methodDef.GenericParameters))
+            using (ThreadStaticListPool.Get<TypeReference>(out var genArguments))
             {
-                var typeGenParameters = genInstanceType.Resolve().GenericParameters.ToArray();
-                var typeGenArguments = genInstanceType.GenericArguments.ToArray();
-                for (int i = typeGenArguments.Length - 1; i >= 0; --i)
+                if (declaringType is GenericInstanceType genInstanceType)
                 {
-                    var genArg = typeGenArguments[i];
-                    if (TryReplaceNoneType(genArg, out genArg, locationMember, locationMethod, locationInstruction))
+                    var typeGenParameters = genInstanceType.Resolve().GenericParameters;
+                    var typeGenArguments = genInstanceType.GenericArguments;
+                    for (int i = typeGenArguments.Count - 1; i >= 0; --i)
                     {
-                        typeGenArguments[i] = genArg;
-                    }
+                        var genArg = typeGenArguments[i];
+                        TryReplaceNoneType(genArg, out genArg, locationMember, locationMethod, locationInstruction);
 
-                    if (genArg != _voidReference)
-                    {
-                        continue;
-                    }
-
-                    var genParameter = typeGenParameters[i];
-                    if (returnType.Is(genParameter))
-                    {
-                        returnType = _voidReference;
-                        isChanged = true;
-                    }
-
-                    for (int j = parameters.Count - 1; j >= 0; --j)
-                    {
-                        if (!parameters[j].ParameterType.Is(genParameter))
+                        if (genArg != _voidReference)
                         {
                             continue;
                         }
 
-                        parameters.RemoveAt(j);
-                        isChanged = true;
+                        var genParameter = typeGenParameters[i];
+                        if (returnType.Is(genParameter))
+                        {
+                            returnType = _voidReference;
+                            isChanged = true;
+                        }
+
+                        for (int j = parameters.Count - 1; j >= 0; --j)
+                        {
+                            if (!parameters[j].ParameterType.Is(genParameter))
+                            {
+                                continue;
+                            }
+
+                            parameters.RemoveAt(j);
+                            isChanged = true;
+                        }
                     }
                 }
-            }
 
-            if (TryReplaceNoneType(declaringType, out declaringType, locationMember, locationMethod, locationInstruction))
-            {
-                isChanged = true;
-            }
-
-            if (method is GenericInstanceMethod genInstanceMethod)
-            {
-                genArguments = genInstanceMethod.GenericArguments.ToList();
-                for (int i = genArguments.Count - 1; i >= 0; --i)
+                if (TryReplaceNoneType(declaringType, out declaringType, locationMember, locationMethod, locationInstruction))
                 {
-                    var genArg = genArguments[i];
-                    if (TryReplaceNoneType(genArg, out genArg, locationMember, locationMethod, locationInstruction))
-                    {
-                        genArguments[i] = genArg;
-                        isChanged = true;
-                    }
-
-                    if (genArg != _voidReference)
-                    {
-                        continue;
-                    }
-
-                    var genParameter = genParameters[i];
-
-                    genArguments.RemoveAt(i);
-                    genParameters.RemoveAt(i);
                     isChanged = true;
+                }
 
-                    if (returnType.Is(genParameter))
+                if (method is GenericInstanceMethod genInstanceMethod)
+                {
+                    genArguments.AddRange(genInstanceMethod.GenericArguments);
+                    for (int i = genArguments.Count - 1; i >= 0; --i)
                     {
-                        returnType = _voidReference;
-                    }
+                        var genArg = genArguments[i];
+                        if (TryReplaceNoneType(genArg, out genArg, locationMember, locationMethod, locationInstruction))
+                        {
+                            genArguments[i] = genArg;
+                            isChanged = true;
+                        }
 
-                    for (int j = parameters.Count - 1; j >= 0; --j)
-                    {
-                        if (!parameters[j].ParameterType.Is(genParameter))
+                        if (genArg != _voidReference)
                         {
                             continue;
                         }
 
-                        parameters.RemoveAt(j);
+                        var genParameter = genParameters[i];
+
+                        genArguments.RemoveAt(i);
+                        genParameters.RemoveAt(i);
+                        isChanged = true;
+
+                        if (returnType.Is(genParameter))
+                        {
+                            returnType = _voidReference;
+                        }
+
+                        for (int j = parameters.Count - 1; j >= 0; --j)
+                        {
+                            if (!parameters[j].ParameterType.Is(genParameter))
+                            {
+                                continue;
+                            }
+
+                            parameters.RemoveAt(j);
+                        }
                     }
+
+                    genArgCount = genArguments.Count;
                 }
-            }
 
-            if (!isChanged)
-            {
-                result = method;
-                return false;
-            }
+                if (!isChanged)
+                {
+                    result = method;
+                    return false;
+                }
 
-            var genArgCount = genArguments?.Count ?? 0;
-            var declaringTypeDef = declaringType.Resolve();
-            var genMethodDef = declaringTypeDef.Methods.FirstOrDefault(v => v.Name == methodDef.Name &&
+                var declaringTypeDef = declaringType.Resolve();
+                var genMethodDef = declaringTypeDef.Methods.FirstOrDefault(v => v.Name == methodDef.Name &&
                                                                             v.GenericParameters.Count == genArgCount &&
                                                                             v.Parameters.Select(v => v.ParameterType).SequenceEqual(parameters.Select(v2 => v2.ParameterType), TypeReferenceComparer.Default));
-            if (genMethodDef == null)
-            {
-                if (locationMethod == null)
+                if (genMethodDef == null)
                 {
-                    ILPPUtils.LogError("GENERICENHANCE5502", "GenericEnhance failed.", $"No method matching \"{method}\" found.", locationMember);
+                    if (locationMethod == null)
+                    {
+                        ILPPUtils.LogError("GENERICENHANCE5502", "GenericEnhance failed.", $"No method matching \"{method}\" found.", locationMember);
+                    }
+                    else
+                    {
+                        ILPPUtils.LogError("GENERICENHANCE5502", "GenericEnhance failed.", $"No method matching \"{method}\" found.", locationMethod, locationInstruction);
+                    }
+                    result = method;
+                    return false;
+                }
+
+                var genMethodRef = _module.ImportReference(genMethodDef);
+                genMethodRef.DeclaringType = declaringType;
+
+                if (genArgCount > 0)
+                {
+                    result = genMethodRef.MakeGenericInstanceMethod(genArguments);
+                    result = _module.ImportReference(result, genMethodRef);
                 }
                 else
                 {
-                    ILPPUtils.LogError("GENERICENHANCE5502", "GenericEnhance failed.", $"No method matching \"{method}\" found.", locationMethod, locationInstruction);
+                    result = _module.ImportReference(genMethodRef);
                 }
-                result = method;
-                return false;
-            }
-
-            var genMethodRef = _module.ImportReference(genMethodDef);
-            genMethodRef.DeclaringType = declaringType;
-
-            if (genArgCount > 0)
-            {
-                result = genMethodRef.MakeGenericInstanceMethod(genArguments.ToArray());
-                result = _module.ImportReference(result, genMethodRef);
-            }
-            else
-            {
-                result = _module.ImportReference(genMethodRef);
             }
 
             result = _module.ImportReference(result);
@@ -1654,59 +1494,61 @@ namespace Katuusagi.GenericEnhance.Editor
             }
 
             bool isChanged = false;
-            var genArguments = genInstanceType.GenericArguments.ToList();
-            for (int i = genArguments.Count - 1; i >= 0; --i)
+            using (ThreadStaticListPool.Get(out var genArguments, genInstanceType.GenericArguments))
             {
-                var genArg = genArguments[i];
-                if (TryReplaceNoneType(genArg, out genArg, locationMember, locationMethod, locationInstruction))
+                for (int i = genArguments.Count - 1; i >= 0; --i)
                 {
-                    genArguments[i] = genArg;
+                    var genArg = genArguments[i];
+                    if (TryReplaceNoneType(genArg, out genArg, locationMember, locationMethod, locationInstruction))
+                    {
+                        genArguments[i] = genArg;
+                        isChanged = true;
+                    }
+
+                    if (genArg != _voidReference)
+                    {
+                        continue;
+                    }
+
+                    genArguments.RemoveAt(i);
                     isChanged = true;
                 }
 
-                if (genArg != _voidReference)
+                if (!isChanged)
                 {
-                    continue;
+                    result = type;
+                    return false;
                 }
 
-                genArguments.RemoveAt(i);
-                isChanged = true;
-            }
-
-            if (!isChanged)
-            {
-                result = type;
-                return false;
-            }
-
-            var genTypeDef = type.Resolve().Module.Types.GetAllTypes().FirstOrDefault(v => v.Namespace == genInstanceType.Namespace &&
+                var genTypeDef = type.Resolve().Module.Types.GetAllTypes().FirstOrDefault(v => v.Namespace == genInstanceType.Namespace &&
                                                                                            v.Name.Split('`')[0] == genInstanceType.Name.Split('`')[0] &&
                                                                                            v.GenericParameters.Count == genArguments.Count);
-            if (genTypeDef == null)
-            {
-                if (locationMethod == null)
+                if (genTypeDef == null)
                 {
-                    ILPPUtils.LogError("GENERICENHANCE5503", "GenericEnhance failed.", $"No type matching \"{type}\" found.", locationMember);
+                    if (locationMethod == null)
+                    {
+                        ILPPUtils.LogError("GENERICENHANCE5503", "GenericEnhance failed.", $"No type matching \"{type}\" found.", locationMember);
+                    }
+                    else
+                    {
+                        ILPPUtils.LogError("GENERICENHANCE5503", "GenericEnhance failed.", $"No type matching \"{type}\" found.", locationMethod, locationInstruction);
+                    }
+                    result = type;
+                    return false;
+                }
+
+                var genTypeRef = _module.ImportReference(genTypeDef);
+                if (genArguments.Any())
+                {
+                    result = genTypeRef.MakeGenericInstanceType(genArguments);
+                    result = _module.ImportReference(result, genTypeRef);
                 }
                 else
                 {
-                    ILPPUtils.LogError("GENERICENHANCE5503", "GenericEnhance failed.", $"No type matching \"{type}\" found.", locationMethod, locationInstruction);
+                    result = _module.ImportReference(genTypeRef);
                 }
-                result = type;
-                return false;
+                return true;
             }
-
-            var genTypeRef = _module.ImportReference(genTypeDef);
-            if (genArguments.Any())
-            {
-                result = genTypeRef.MakeGenericInstanceType(genArguments.ToArray());
-                result = _module.ImportReference(result, genTypeRef);
-            }
-            else
-            {
-                result = _module.ImportReference(genTypeRef);
-            }
-            return true;
         }
     }
 }
