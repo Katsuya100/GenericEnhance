@@ -500,7 +500,7 @@ namespace Katuusagi.GenericEnhance.SourceGenerator
                         {
                             if (typeParameterMin == 0)
                             {
-                                ContextUtils.LogError("GENERICENHANCE4003", "GenericEnhance failed.", $"0 is not supported for typeParameterMin.", variadicType);
+                                ContextUtils.LogError("GENERICENHANCE4004", "GenericEnhance failed.", $"0 is not supported for typeParameterMin.", variadicType);
                                 typeParameterMin = 1;
                             }
                         }
