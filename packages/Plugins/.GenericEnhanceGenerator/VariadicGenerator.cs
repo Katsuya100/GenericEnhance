@@ -6,7 +6,9 @@ using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Text;
 using System;
 using System.Collections.Generic;
+using System.Data.Common;
 using System.Linq;
+using System.Reflection.Metadata;
 using System.Text;
 using System.Text.RegularExpressions;
 
@@ -491,6 +493,16 @@ namespace Katuusagi.GenericEnhance.SourceGenerator
                         else
                         {
                             variadicType.TryGetArgumentValue("typeParameterMax", 0, 0, out typeParameterMax);
+                        }
+
+                        var symbols = context.ParseOptions.PreprocessorSymbolNames;
+                        if (symbols.Contains("DISABLE_GENERATE_IL"))
+                        {
+                            if (typeParameterMin == 0)
+                            {
+                                ContextUtils.LogError("GENERICENHANCE4003", "GenericEnhance failed.", $"0 is not supported for typeParameterMin.", variadicType);
+                                typeParameterMin = 1;
+                            }
                         }
 
                         var lastTypeParameter = typeParameters.LastOrDefault();

@@ -2,6 +2,7 @@ using System;
 
 namespace Katuusagi.GenericEnhance
 {
+#if !DISABLE_GENERATE_IL
     [AttributeUsage(AttributeTargets.Struct | AttributeTargets.Class, AllowMultiple = false)]
     public class TypeDef : Attribute
     {
@@ -21,4 +22,5 @@ namespace Katuusagi.GenericEnhance
             TypeName = name;
         }
     }
+#endif
 }

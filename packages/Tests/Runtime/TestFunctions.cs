@@ -5,6 +5,7 @@ namespace Katuusagi.GenericEnhance.Tests
 {
     public partial class TestFunctions
     {
+#if !DISABLE_GENERATE_IL
         [TypeDef(typeof(int))]
         public struct DefInt
         {
@@ -25,6 +26,7 @@ namespace Katuusagi.GenericEnhance.Tests
         }
 
         public static DefInt DefValue;
+#endif
 
         public void WrappedGetValue_VirtualStrategy<T>(out T value)
         {
@@ -343,6 +345,7 @@ namespace Katuusagi.GenericEnhance.Tests
             return default;
         }
 
+#if !DISABLE_GENERATE_IL
         [VariadicGeneric(1, 16)]
         public static string Take<T>(int count, T args)
         {
@@ -421,6 +424,7 @@ namespace Katuusagi.GenericEnhance.Tests
 
             return values;
         }
+#endif
 
         [VariadicGeneric(1, 16)]
         public static string ForEachJoin<T>(string separator, T args)
@@ -461,13 +465,28 @@ namespace Katuusagi.GenericEnhance.Tests
             return value.GetType().Name;
         }
 
+#if DISABLE_GENERATE_IL
+        [VariadicGeneric(1, 16)]
+#else
         [VariadicGeneric(0, 16)]
+#endif
         public static void InvokeAction<TVar>(Action<TVar> action, TVar args)
         {
             action?.Invoke(args);
         }
 
+#if DISABLE_GENERATE_IL
+        public static void InvokeAction(Action action)
+        {
+            action?.Invoke();
+        }
+#endif
+
+#if DISABLE_GENERATE_IL
+        [VariadicGeneric(1, 16)]
+#else
         [VariadicGeneric(0, 16)]
+#endif
         public static TResult InvokeFunc<TResult, TVar>(Func<TVar, TResult> func, TVar args)
         {
             if (func == null)
@@ -477,5 +496,17 @@ namespace Katuusagi.GenericEnhance.Tests
 
             return func(args);
         }
+
+#if DISABLE_GENERATE_IL
+        public static TResult InvokeFunc<TResult>(Func<TResult> func)
+        {
+            if (func == null)
+            {
+                return default;
+            }
+
+            return func();
+        }
+#endif
     }
 }

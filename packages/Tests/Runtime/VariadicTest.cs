@@ -18,6 +18,7 @@ namespace Katuusagi.GenericEnhance.Tests
             Assert.AreEqual(concat, $"{1}, {2.3f}, {4.56789}, hoge");
         }
 
+#if !DISABLE_GENERATE_IL
         [Test]
         public void Break()
         {
@@ -50,5 +51,6 @@ namespace Katuusagi.GenericEnhance.Tests
             Assert.AreEqual(array[4], 5);
             Assert.AreEqual(array[5], 6);
         }
+#endif
     }
 }

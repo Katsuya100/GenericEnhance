@@ -3,6 +3,7 @@ using System;
 
 namespace Katuusagi.GenericEnhance.Tests
 {
+#if !DISABLE_GENERATE_IL
     [TypeDef(typeof(Equal<bool, Not<NotEqual<int, _5, _10>>, _true>))]
     public struct BoolValue : ITypeFormula<bool>
     {
@@ -28,7 +29,16 @@ namespace Katuusagi.GenericEnhance.Tests
         float ITypeFormula<float>.Result => default;
     }
 
-    public class TypeFormulaTest : IComparable<IntValue>
+    public class CompIntValue : IComparable<IntValue>
+    {
+        int IComparable<IntValue>.CompareTo(IntValue other)
+        {
+            return 100;
+        }
+    }
+#endif
+
+    public class TypeFormulaTest
     {
         [Test]
         public void GetValue()
@@ -52,6 +62,7 @@ namespace Katuusagi.GenericEnhance.Tests
             Assert.AreEqual(sub, 100 - 200);
         }
 
+#if !DISABLE_GENERATE_IL
         [Test]
         public void Variable()
         {
@@ -68,7 +79,8 @@ namespace Katuusagi.GenericEnhance.Tests
         [Test]
         public void OptimizedFormula()
         {
-            var v = ((IComparable<Add<int, _200, _100>>)this).CompareTo(default);
+            var comp = new CompIntValue();
+            var v = ((IComparable<Add<int, _200, _100>>)comp).CompareTo(default);
             Assert.AreEqual(v, 100);
             Assert.AreEqual(typeof(Add<int, _30, _90>), typeof(Add<int, _60, _60>));
             Assert.AreEqual(typeof(_100), typeof(Add<int, _50, _50>));
@@ -81,10 +93,6 @@ namespace Katuusagi.GenericEnhance.Tests
         {
             return typeof(Add<T, TX, TY>);
         }
-
-        int IComparable<IntValue>.CompareTo(IntValue other)
-        {
-            return 100;
-        }
+#endif
     }
 }

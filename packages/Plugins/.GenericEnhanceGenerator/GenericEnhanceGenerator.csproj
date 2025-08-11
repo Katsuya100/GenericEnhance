@@ -20,6 +20,6 @@
   </ItemGroup>
 
   <Target Name="PostBuild" AfterTargets="PostBuildEvent">
-    <Exec Command="copy /y &quot;$(TargetPath)&quot; &quot;$(SolutionDir)..\packages\Plugins\$(TargetFileName)&quot;" />
+    <Exec Command="copy /y &quot;$(TargetPath)&quot; &quot;$(SolutionDir)..\$(TargetFileName)&quot;" />
   </Target>
 </Project>

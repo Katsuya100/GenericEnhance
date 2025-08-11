@@ -14,14 +14,14 @@
 ## 動作確認環境
 |  環境  |  バージョン  |
 | ---- | ---- |
-| Unity | 2021.3.38f1, 2022.3.20f1 |
+| Unity | 6000.0.51f1 |
 | .Net | 4.x, Standard 2.1 |
 
 ## インストール方法
 ### 依存パッケージをインストール
 以下のパッケージをインストールする。  
 
-- [ILPostProcessorCommon v2.3.0](https://github.com/Katsuya100/ILPostProcessorCommon/tree/v2.3.0)
+- [ILPostProcessorCommon v2.3.0](https://github.com/Katsuya100/ILPostProcessorCommon/tree/v2.4.1)
 - [MemoizationForUnity v1.5.0](https://github.com/Katsuya100/MemoizationForUnity/tree/v1.5.0)
 
 ### GenericEnhanceのインストール
@@ -176,6 +176,7 @@ using (new Measure("Static Strategy", log))
 `TypeComparison`はキャッシュを作成しないため、メモリ面で最も高いパフォーマンスを発揮できます。  
 
 ### リプレース最適化
+※DISABLE_GENERATE_ILが定義されている場合は無効になります。
 以下の条件が揃っている場合に限り、アルゴリズムを問わず直接呼び出しにリプレースされます。  
 直接呼び出しと同じパフォーマンスを発揮できますので、積極的な活用を推奨します。  
 
@@ -217,6 +218,7 @@ public T WrappedGetValue<T>()
 ```
 
 ## TypeDef
+※DISABLE_GENERATE_ILが定義されている場合は無効になります。
 `TypeDef`属性を用いることで、すでにある型を別名で再定義できます。  
 エイリアスとしての利用の他、Generic内部から生成した型を返却するのにも使えます。  
 
@@ -274,6 +276,7 @@ Debug.Log(typeof(Any<int>.Element)); // Int32
 ```
 
 ### 型の再解釈
+※DISABLE_GENERATE_ILが定義されている場合は無効になります。
 `TypeDef`属性の付いている型はILレベルでリプレースされます。  
 しかし、C#側から見ると別の型として解釈されています。  
 C#から型を再解釈したい場合は`CastUtils.SafeAs`関数を用いましょう。
@@ -411,6 +414,7 @@ Debug.Log(value); // 310
 ```
 
 ### リプレース最適化
+※DISABLE_GENERATE_ILが定義されている場合は無効になります。
 異なる型引数が与えられていない場合、演算結果がリプレースされます。  
 
 ```.cs
@@ -424,6 +428,7 @@ Debug.Log(typeof(Add<int, _100, T>)); // Add<int, _100, T>
 ```
 
 ## 省略型
+※DISABLE_GENERATE_ILが定義されている場合は無効になります。
 引数に`NoneType`型を指定すると、その引数が内部的に無効化されます。  
 主にGeneric引数のパディングとして用います。  
 
@@ -562,6 +567,7 @@ public static string ForEachJoin<T__0, T__1, T__2, T__3, T__4, T__5, T__6, T__7,
 ```
 
 #### continue句やbreak句
+※DISABLE_GENERATE_ILが定義されている場合は無効になります。
 `VariadicUtils.Break`関数や`VariadicUtils.Continue`関数を用いればbreak句やcontinue句を表現できます。  
 
 ```.cs
@@ -615,6 +621,7 @@ using (new VariadicForEach())
 ```
 
 ### 型引数の要素数を調べる
+※DISABLE_GENERATE_ILが定義されている場合は無効になります。
 `VariadicUtils.VariadicParameterCount`を使うことで可変長型引数の要素数を取得できます。  
 以下の例では与えられた引数を配列に変換しています。
 ```.cs

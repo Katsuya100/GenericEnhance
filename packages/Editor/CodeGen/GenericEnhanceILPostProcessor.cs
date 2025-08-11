@@ -154,24 +154,14 @@ namespace Katuusagi.GenericEnhance.Editor
                         }
                     }
 
-                    var pe  = new MemoryStream();
-                    var pdb = new MemoryStream();
-                    var writeParameter = new WriterParameters
-                    {
-                        SymbolWriterProvider = new PortablePdbWriterProvider(),
-                        SymbolStream         = pdb,
-                        WriteSymbols         = true
-                    };
-
-                    assembly.Write(pe, writeParameter);
-                    return new ILPostProcessResult(new InMemoryAssembly(pe.ToArray(), pdb.ToArray()), ILPPUtils.Logger.Messages);
+                    return compiledAssembly.GetResult(assembly);
                 }
             }
             catch (Exception e)
             {
                 ILPPUtils.LogException(e);
             }
-            return new ILPostProcessResult(null, ILPPUtils.Logger.Messages);
+            return compiledAssembly.GetNullResult();
         }
 
         private void TypeDefProcess(TypeDefinition type)

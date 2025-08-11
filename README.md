@@ -16,14 +16,14 @@ These incorporate some of the features that were available in C++ templates for 
 ## System Requirements
 |  Environment  |  Version  |
 | ---- | ---- |
-| Unity | 2021.3.38f1, 2022.3.20f1 |
+| Unity | 6000.0.51f1 |
 | .Net | 4.x, Standard 2.1 |
 
 ## How to install
 ### Install dependenies
 Install the following packages.  
 
-- [ILPostProcessorCommon v2.3.0](https://github.com/Katsuya100/ILPostProcessorCommon/tree/v2.3.0)
+- [ILPostProcessorCommon v2.3.0](https://github.com/Katsuya100/ILPostProcessorCommon/tree/v2.4.1)
 - [MemoizationForUnity v1.5.0](https://github.com/Katsuya100/MemoizationForUnity/tree/v1.5.0)
 
 ### Installing GenericEnhance
@@ -176,6 +176,7 @@ However, since the timing and frequency of cache creation varies depending on th
 `TypeComparison` does not create a cache and therefore offers the highest performance in terms of memory.  
 
 ### Replacement Optimization
+*It is disabled if DISABLE_GENERATE_IL is defined.
 Only if the following conditions are met will the call be replaced by a direct call, regardless of the algorithm.  
 The same performance as a direct call can be achieved, so active use of this feature is recommended.  
 
@@ -217,6 +218,7 @@ public T WrappedGetValue<T>()
 ```
 
 ## TypeDef
+*It is disabled if DISABLE_GENERATE_IL is defined.
 The `TypeDef` attribute can be used to redefine an already existing type with an alias.  
 Besides its use as an alias, it can also be used to return a type generated from within Generic.  
 
@@ -273,6 +275,7 @@ Debug.Log(typeof(Any<int>.Element)); // Int32
 ```
 
 ### Reinterpretation of type
+*It is disabled if DISABLE_GENERATE_IL is defined.
 Types with the `TypeDef` attribute are replaced at the IL level.  
 However, from the C# side, they are interpreted as different types.  
 If you want to reinterpret the type from C#, use the `CastUtils.SafeAs` function.
@@ -412,6 +415,7 @@ Debug.Log(value); // 310
 ```
 
 ### Replacement Optimization
+*It is disabled if DISABLE_GENERATE_IL is defined.
 If a different type argument is not given, the result of the operation is replaced.  
 
 ```.cs
@@ -425,6 +429,7 @@ Debug.Log(typeof(Add<int, _100, T>)); // Add<int, _100, T>
 ```
 
 ## None Type
+*It is disabled if DISABLE_GENERATE_IL is defined.
 A `NoneType` argument of type `NoneType` disables that argument internally.  
 This is mainly used as padding for Generic arguments.  
 
@@ -563,6 +568,7 @@ public static string ForEachJoin<T__0, T__1, T__2, T__3, T__4, T__5, T__6, T__7,
 ```
 
 #### continue clause and break clause
+*It is disabled if DISABLE_GENERATE_IL is defined.
 `Variadic.Break` and `VariadicUtils.Continue` methods can be used to express break and continue clauses.  
 
 ```.cs
@@ -616,6 +622,7 @@ using (new VariadicForEach())
 ```
 
 ### Check the count of elements in the type argument
+*It is disabled if DISABLE_GENERATE_IL is defined.
 You can use `VariadicUtils.VariadicParameterCount` to get the number of elements in a variable-length argument.  
 The following example converts the given arguments to an array.
 ```.cs

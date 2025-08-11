@@ -2,6 +2,7 @@ using NUnit.Framework;
 
 namespace Katuusagi.GenericEnhance.Tests
 {
+#if !DISABLE_GENERATE_IL
     public class NoneTypeTest
     {
         [Test]
@@ -43,4 +44,5 @@ namespace Katuusagi.GenericEnhance.Tests
             }
         }
     }
+#endif
 }

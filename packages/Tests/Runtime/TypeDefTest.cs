@@ -5,6 +5,7 @@ using UnityEngine;
 
 namespace Katuusagi.GenericEnhance.Tests
 {
+#if !DISABLE_GENERATE_IL
     public class TypeDefTest
     {
         [Test]
@@ -64,4 +65,5 @@ namespace Katuusagi.GenericEnhance.Tests
             }
         }
     }
+#endif
 }
